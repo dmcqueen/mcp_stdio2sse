@@ -15,14 +15,14 @@ jobs:
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
-      - name: Check out the servers repository
+      - name: Check out servers repository (to discover subfolders)
         uses: actions/checkout@v3
         with:
           repository: modelcontextprotocol/servers
           ref: main
           path: servers
 
-      - name: Discover server directories in servers/src
+      - name: Discover server directories
         id: set-matrix
         run: |
           # Find all directories directly under "servers/src"
@@ -34,12 +34,9 @@ jobs:
           matrix="{\"include\":["
           first=true
           for server in $servers; do
-            # basename of the directory
-            server_name=$(basename "$server")
-
-            # Check if there's a Dockerfile
+            dir_name=$(basename "$server")
             if [ ! -f "$server/Dockerfile" ]; then
-              echo "No Dockerfile in $server. Skipping."
+              echo "No Dockerfile in $server; skipping."
               continue
             fi
 
@@ -48,8 +45,7 @@ jobs:
             else
               matrix="$matrix,"
             fi
-
-            matrix="$matrix{\"server\":\"$server_name\"}"
+            matrix="$matrix{\"server\":\"$dir_name\"}"
           done
           matrix="$matrix]}"
 
@@ -65,13 +61,13 @@ jobs:
       matrix: ${{ fromJson(needs.find-servers.outputs.matrix) }}
 
     steps:
-      # 1) Check out the *current* repo to access uv.lock or pyproject.toml
-      - name: Check out the current repository
+      # 1) Check out the *current* repo, which contains uv.lock (and maybe pyproject.toml)
+      - name: Check out this repo
         uses: actions/checkout@v3
         with:
           path: this-repo
 
-      # 2) Check out the servers repository again (for this job)
+      # 2) Check out the servers repository (this is our Docker build context)
       - name: Check out servers repository
         uses: actions/checkout@v3
         with:
@@ -79,26 +75,33 @@ jobs:
           ref: main
           path: servers
 
-      # 3) Copy uv.lock (and optionally pyproject.toml) to the servers build context
-      #    So Docker can find them with --mount=type=bind,source=uv.lock,target=uv.lock
-      - name: Copy lockfile(s) into build context
+      # 3) Copy uv.lock (and optionally pyproject.toml) into servers/
+      #    so Docker can find them with --mount=type=bind
+      - name: Copy uv.lock and pyproject.toml into build context
         run: |
           if [ -f this-repo/uv.lock ]; then
             cp this-repo/uv.lock servers/uv.lock
-            echo "Copied uv.lock to servers/."
+            echo "Copied uv.lock -> servers/uv.lock."
           else
-            echo "No uv.lock file found."
+            echo "No uv.lock found in this-repo/. Skipping."
           fi
 
-          # Optional: If you have pyproject.toml and the Dockerfile expects it:
           if [ -f this-repo/pyproject.toml ]; then
             cp this-repo/pyproject.toml servers/pyproject.toml
-            echo "Copied pyproject.toml to servers/."
+            echo "Copied pyproject.toml -> servers/pyproject.toml."
           else
-            echo "No pyproject.toml file found."
+            echo "No pyproject.toml found in this-repo/. Skipping."
           fi
 
-      # 4) Build Docker image using the existing Dockerfile (unchanged)
+      # 4) Confirm the files exist in the build context
+      - name: Confirm build context contents
+        run: |
+          echo "Contents of servers/:"
+          ls -al servers/
+          echo
+          echo "If there's a .dockerignore in servers/, verify it does NOT exclude uv.lock or pyproject.toml."
+
+      # 5) Docker build using the existing Dockerfile from each server folder
       - name: Build Docker image
         run: |
           docker build \
