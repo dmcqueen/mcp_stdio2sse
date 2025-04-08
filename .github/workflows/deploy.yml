@@ -67,7 +67,7 @@ jobs:
         with:
           path: this-repo
 
-      # 2) Check out the servers repo again
+      # 2) Check out the servers repo
       - name: Check out servers repository
         uses: actions/checkout@v3
         with:
@@ -76,13 +76,9 @@ jobs:
           path: servers
 
       # 3) Optionally copy uv.lock and pyproject.toml
-      #
-      #    If your uv.lock and pyproject.toml live under servers/src/time/ instead of in "this-repo",
-      #    you can copy them up to servers/ so that Docker sees them in the build context root.
+      #    (Adjust the paths as needed to match your actual layout.)
       - name: Copy local uv.lock and pyproject.toml up
         run: |
-          # Adjust the path to whichever subfolder holds these two files.
-          # E.g., "servers/src/${{ matrix.server }}/uv.lock"
           if [ -f "servers/src/${{ matrix.server }}/uv.lock" ]; then
             cp "servers/src/${{ matrix.server }}/uv.lock" servers/uv.lock
             echo "Copied uv.lock up to servers/uv.lock"
@@ -99,6 +95,12 @@ jobs:
           ls -al servers
 
       # 5) Build the Docker image from the server subfolder Dockerfile
+      #
+      #    IMPORTANT: your Dockerfile must be set up so that either:
+      #    - your source code directory matches the [project.name] in pyproject.toml, OR
+      #    - you have defined [tool.hatch.build.targets.wheel] packages = ["<some_dir>"]
+      #      so Hatch knows where your Python package code actually resides.
+      #
       - name: Build Docker image
         run: |
           docker build \
