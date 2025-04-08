@@ -91,42 +91,15 @@ jobs:
             echo "No uv.lock file found in top-level of this repo."
           fi
 
-          # If you also need pyproject.toml:
-          # if [ -f this-repo/pyproject.toml ]; then
-          #   cp this-repo/pyproject.toml servers/
-          #   echo "Copied pyproject.toml to servers/."
-          # else
-          #   echo "No pyproject.toml file found in top-level of this repo."
-          # fi
-
-      # 4) Patch Dockerfile if it references ephemeral mounts for uv.lock
-      - name: Patch Dockerfile if it references uv.lock ephemeral mounts
-        run: |
-          DOCKERFILE="servers/src/${{ matrix.server }}/Dockerfile"
-
-          if grep -q "source=uv.lock" "$DOCKERFILE"; then
-            echo "Detected ephemeral mount usage for uv.lock in $DOCKERFILE"
-            echo "Patching Dockerfile to use COPY statements instead..."
-
-            # 1) Remove ephemeral mount statements
-            sed -i '/--mount=type=bind,source=uv.lock/d' "$DOCKERFILE"
-            sed -i '/--mount=type=bind,source=pyproject.toml/d' "$DOCKERFILE"
-
-            # 2) Insert COPY statements right before the `uv sync` command
-            sed -i '/uv sync --frozen --no-install-project --no-dev --no-editable/i COPY uv.lock .' "$DOCKERFILE"
-            sed -i '/uv sync --frozen --no-install-project --no-dev --no-editable/i COPY pyproject.toml .' "$DOCKERFILE"
-
-            # 3) Convert the plain "uv sync ..." into a "RUN uv sync ..."
-            sed -i 's@^[[:space:]]*uv sync @RUN uv sync @g' "$DOCKERFILE"
-
-            echo "Done patching!"
-            echo "Updated Dockerfile contents:"
-            cat "$DOCKERFILE"
+          If you also need pyproject.toml:
+          if [ -f this-repo/pyproject.toml ]; then
+            cp this-repo/pyproject.toml servers/
+            echo "Copied pyproject.toml to servers/."
           else
-            echo "No ephemeral uv.lock usage found in $DOCKERFILE. No patch needed."
+            echo "No pyproject.toml file found in top-level of this repo."
           fi
 
-      # 5) Build Docker image
+      # 4) Build Docker image
       - name: Build Docker image
         run: |
           docker build \
