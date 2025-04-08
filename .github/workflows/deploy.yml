@@ -76,18 +76,33 @@ jobs:
           ref: main
           path: servers
 
-      # - name: Log in to Docker
-      #   run: |
-      #     echo "${{ secrets.DOCKERHUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+      - name: Patch Dockerfile if it references uv.lock ephemeral mounts
+        run: |
+          DOCKERFILE="servers/src/${{ matrix.server }}/Dockerfile"
+
+          if grep -q "source=uv.lock" "$DOCKERFILE"; then
+            echo "Detected ephemeral mount usage for uv.lock in $DOCKERFILE"
+            echo "Patching Dockerfile to use COPY statements instead..."
+
+            # 1) Remove ephemeral mount statements referencing uv.lock or pyproject.toml
+            sed -i '/--mount=type=bind,source=uv.lock/d' "$DOCKERFILE"
+            sed -i '/--mount=type=bind,source=pyproject.toml/d' "$DOCKERFILE"
+
+            # 2) Insert COPY statements before the `uv sync ...` command.
+            #    We run two separate sed commands so each COPY line is inserted individually.
+            sed -i '/uv sync --frozen --no-install-project --no-dev --no-editable/i COPY uv.lock .' "$DOCKERFILE"
+            sed -i '/uv sync --frozen --no-install-project --no-dev --no-editable/i COPY pyproject.toml .' "$DOCKERFILE"
+
+            echo "Done patching!"
+            echo "Updated Dockerfile contents:"
+            cat "$DOCKERFILE"
+          else
+            echo "No ephemeral uv.lock usage found in $DOCKERFILE. No patch needed."
+          fi
 
       - name: Build Docker image
         run: |
-          # Build the Docker image from each subdirectory in servers/src/<server_name>
           docker build \
             --file servers/src/${{ matrix.server }}/Dockerfile \
             --tag yourorg/${{ matrix.server }}:latest \
             servers
-
-      # - name: Push Docker image
-      #   run: |
-      #     docker push yourorg/${{ matrix.server }}:latest
