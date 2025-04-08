@@ -76,9 +76,9 @@ jobs:
           ref: main
           path: servers
 
-      - name: Log in to Docker
-        run: |
-          echo "${{ secrets.DOCKERHUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+      # - name: Log in to Docker
+      #   run: |
+      #     echo "${{ secrets.DOCKERHUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
 
       - name: Build Docker image
         run: |
@@ -88,6 +88,6 @@ jobs:
             --tag yourorg/${{ matrix.server }}:latest \
             servers/src/${{ matrix.server }}
 
-      - name: Push Docker image
-        run: |
-          docker push yourorg/${{ matrix.server }}:latest
+      # - name: Push Docker image
+      #   run: |
+      #     docker push yourorg/${{ matrix.server }}:latest
