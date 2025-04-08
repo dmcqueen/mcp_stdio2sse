@@ -40,10 +40,6 @@ jobs:
               continue
             fi
 
-            # We do NOT skip or remove the server from the matrix here in order
-            # to illustrate the skip logic in the build job itself.
-            # (Alternatively, you could skip adding it to the matrix if uv.lock is found.)
-
             if [ "$first" = true ]; then
               first=false
             else
@@ -80,7 +76,7 @@ jobs:
           path: servers
 
       # 3) Optionally copy uv.lock and pyproject.toml
-      - name: Copy local uv.lock and pyproject.toml up
+      - name: Copy local uv.lock and pyproject.toml
         run: |
           if [ -f "servers/src/${{ matrix.server }}/uv.lock" ]; then
             cp "servers/src/${{ matrix.server }}/uv.lock" servers/uv.lock
@@ -97,8 +93,8 @@ jobs:
           echo "Listing servers/ after copying any uv.lock or pyproject.toml:"
           ls -al servers
 
-      # 5) Check for uv.lock and set a 'skip_build' output
-      - name: Check for uv.lock
+      # 5) Check for pyproject.toml and set a 'skip_build' output
+      - name: Check for pyproject.toml
         id: check-uvlock
         run: |
           if [ -f "servers/src/${{ matrix.server }}/pyproject.toml" ]; then
@@ -107,9 +103,20 @@ jobs:
           else
             echo "No pyproject.toml found for ${{ matrix.server }}."
             echo "skip_build=false" >> $GITHUB_OUTPUT
+
+      # 6) Create directory (named as the server) and put README.md in it
+      - name: Create directory and copy README.md
+        if: steps.check-uvlock.outputs.skip_build == 'false'
+        run: |
+          mkdir -p "this-repo/${{ matrix.server }}"
+          if [ -f "servers/src/${{ matrix.server }}/README.md" ]; then
+            cp "servers/src/${{ matrix.server }}/README.md" "this-repo/${{ matrix.server }}/README.md"
+            echo "README.md copied to this-repo/${{ matrix.server }}/"
+          else
+            echo "No README.md found for ${{ matrix.server }}; skipping copy."
           fi
 
-      # 6) Build the Docker image, only if skip_build == 'false'
+      # 7) Build the Docker image, only if skip_build == 'false'
       - name: Build Docker image
         if: steps.check-uvlock.outputs.skip_build == 'false'
         run: |
