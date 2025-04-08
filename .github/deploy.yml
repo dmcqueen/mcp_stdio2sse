@@ -1,0 +1,93 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+    # Adjust if you only want to run on changes in your local workflow repo
+    paths:
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+
+jobs:
+  find-servers:
+    name: Find Servers
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Check out the servers repository
+        uses: actions/checkout@v3
+        with:
+          # The external repo you want to build from:
+          repository: modelcontextprotocol/servers
+          # The branch or tag you want to build from:
+          ref: main
+          # Put the external repo into the 'servers' folder
+          path: servers
+
+      - name: Discover server directories in servers/src
+        id: set-matrix
+        run: |
+          # Find all directories directly under "servers/src"
+          servers=$(find servers/src -mindepth 1 -maxdepth 1 -type d)
+          echo "Found servers in servers/src:"
+          echo "$servers"
+
+          # Build matrix JSON
+          matrix="{\"include\":["
+          first=true
+          for server in $servers; do
+            # basename of the directory
+            server_name=$(basename "$server")
+
+            # Check if there's a Dockerfile
+            if [ ! -f "$server/Dockerfile" ]; then
+              echo "No Dockerfile in $server. Skipping."
+              continue
+            fi
+
+            if [ "$first" = true ]; then
+              first=false
+            else
+              matrix="$matrix,"
+            fi
+
+            matrix="$matrix{\"server\":\"$server_name\"}"
+          done
+          matrix="$matrix]}"
+
+          echo "Matrix: $matrix"
+          echo "matrix=$matrix" >> $GITHUB_OUTPUT
+
+  build-and-deploy:
+    name: Build and Deploy
+    needs: [find-servers]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.find-servers.outputs.matrix) }}
+
+    steps:
+      - name: Check out the servers repository
+        uses: actions/checkout@v3
+        with:
+          repository: modelcontextprotocol/servers
+          ref: main
+          path: servers
+
+      - name: Log in to Docker
+        run: |
+          echo "${{ secrets.DOCKERHUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+
+      - name: Build Docker image
+        run: |
+          # Build the Docker image from each subdirectory in servers/src/<server_name>
+          docker build \
+            --file servers/src/${{ matrix.server }}/Dockerfile \
+            --tag yourorg/${{ matrix.server }}:latest \
+            servers/src/${{ matrix.server }}
+
+      - name: Push Docker image
+        run: |
+          docker push yourorg/${{ matrix.server }}:latest
