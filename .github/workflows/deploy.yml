@@ -84,14 +84,16 @@ jobs:
             echo "Detected ephemeral mount usage for uv.lock in $DOCKERFILE"
             echo "Patching Dockerfile to use COPY statements instead..."
 
-            # 1) Remove ephemeral mount statements referencing uv.lock or pyproject.toml
+            # 1) Remove ephemeral mount statements
             sed -i '/--mount=type=bind,source=uv.lock/d' "$DOCKERFILE"
             sed -i '/--mount=type=bind,source=pyproject.toml/d' "$DOCKERFILE"
 
-            # 2) Insert COPY statements before the `uv sync ...` command.
-            #    We run two separate sed commands so each COPY line is inserted individually.
+            # 2) Insert COPY statements right before the `uv sync` command
             sed -i '/uv sync --frozen --no-install-project --no-dev --no-editable/i COPY uv.lock .' "$DOCKERFILE"
             sed -i '/uv sync --frozen --no-install-project --no-dev --no-editable/i COPY pyproject.toml .' "$DOCKERFILE"
+
+            # 3) Convert the plain "uv sync ..." into a "RUN uv sync ..."
+            sed -i 's@^uv sync @RUN uv sync @g' "$DOCKERFILE"
 
             echo "Done patching!"
             echo "Updated Dockerfile contents:"
