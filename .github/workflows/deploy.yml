@@ -101,11 +101,11 @@ jobs:
       - name: Check for uv.lock
         id: check-uvlock
         run: |
-          if [ -f "servers/src/${{ matrix.server }}/uv.lock" ]; then
-            echo "uv.lock found for ${{ matrix.server }}; build will be skipped."
+          if [ -f "servers/src/${{ matrix.server }}/pyproject.toml" ]; then
+            echo "pyproject.toml found for ${{ matrix.server }}; build will be skipped."
             echo "skip_build=true" >> $GITHUB_OUTPUT
           else
-            echo "No uv.lock found for ${{ matrix.server }}."
+            echo "No pyproject.toml found for ${{ matrix.server }}."
             echo "skip_build=false" >> $GITHUB_OUTPUT
           fi
 
