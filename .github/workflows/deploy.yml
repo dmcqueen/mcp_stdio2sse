@@ -21,7 +21,7 @@ jobs:
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
-      - name: Check out servers repository (to discover subfolders)
+      - name: Check out servers repository
         uses: actions/checkout@v3
         with:
           repository: modelcontextprotocol/servers
@@ -33,6 +33,7 @@ jobs:
         run: |
           # Find all directories directly under "servers/src"
           servers=$(find servers/src -mindepth 1 -maxdepth 1 -type d)
+
           echo "Found servers in servers/src:"
           echo "$servers"
 
@@ -59,8 +60,9 @@ jobs:
           echo "matrix=$matrix" >> $GITHUB_OUTPUT
 
   ##################################################################
-  # 2) Build each server in parallel. Each server process
-  #    checks if uv.lock is present.
+  # 2) Build each server in parallel:
+  #    - Check if uv.lock is present in that server folder
+  #    - Skip build if found
   ##################################################################
   build-and-collect:
     name: Build and Collect
@@ -69,14 +71,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.find-servers.outputs.matrix) }}
-    steps:
-      # First, check out THIS repo so we can see if uv.lock is present
-      - name: Check out this repo
-        uses: actions/checkout@v3
-        with:
-          path: this-repo
-          fetch-depth: 0
 
+    steps:
       - name: Check out servers repository
         uses: actions/checkout@v3
         with:
@@ -84,25 +80,28 @@ jobs:
           ref: main
           path: servers
 
-      - name: Check for uv.lock
+      - name: Check if uv.lock exists for this server
         id: uv-check
         run: |
-          if [ -f this-repo/uv.lock ]; then
-            echo "lock-found=true" >> $GITHUB_OUTPUT
+          if [ -f "servers/src/${{ matrix.server }}/uv.lock" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "uv.lock found in ${{ matrix.server }}. Skipping build."
           else
-            echo "lock-found=false" >> $GITHUB_OUTPUT
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "No uv.lock in ${{ matrix.server }}. Proceeding."
           fi
 
       - name: Build Docker image
-        if: steps.uv-check.outputs.lock-found == 'false'
+        if: ${{ steps.uv-check.outputs.found == 'false' }}
         run: |
+          echo "Building server ${{ matrix.server }}..."
           docker build \
             --file "servers/src/${{ matrix.server }}/Dockerfile" \
             --tag "exampleorg/${{ matrix.server }}:latest" \
             servers
 
       - name: Package server README (if present)
-        if: steps.uv-check.outputs.lock-found == 'false'
+        if: ${{ steps.uv-check.outputs.found == 'false' }}
         run: |
           if [ -f "servers/src/${{ matrix.server }}/README.md" ]; then
             mkdir -p "readme-${{ matrix.server }}"
@@ -110,7 +109,7 @@ jobs:
           fi
 
       - name: Upload artifact
-        if: steps.uv-check.outputs.lock-found == 'false'
+        if: ${{ steps.uv-check.outputs.found == 'false' }}
         uses: actions/upload-artifact@v4
         with:
           name: readme-${{ matrix.server }}
@@ -118,19 +117,16 @@ jobs:
           if-no-files-found: ignore
 
   ##################################################################
-  # 3) Final job: downloads all artifacts, checks out *this* repo,
-  #    collects the READMEs, then commits & pushes once.
-  #
-  # NOTE: If you'd like to skip the finalize step if uv.lock was found
-  # for ALL servers, you can conditionally skip here, too. For example:
-  # if: "needs.build-and-collect.outputs.any-build == 'true'"
+  # 3) (Optional) Final job: downloads all README artifacts,
+  #    then commits them into this same repo under subfolders
+  #    named after each server. Remove/modify if you don't need this.
   ##################################################################
   finalize-push:
     name: Collect & Push READMEs
     needs: [build-and-collect]
     runs-on: ubuntu-latest
     steps:
-      - name: Check out this repo
+      - name: Check out this repo (the "deploy" repo)
         uses: actions/checkout@v3
         with:
           path: this-repo
@@ -145,7 +141,6 @@ jobs:
       - name: Move READMEs into the repo
         run: |
           cd collected-readmes
-          # Each artifact is in a subdirectory named readme-<server>
           for d in readme-*; do
             if [ -d "$d" ]; then
               server="${d#readme-}"  # remove 'readme-' prefix
@@ -162,7 +157,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Pull + rebase to avoid "rejected" errors if main moved
+          # Pull + rebase to avoid conflicts if main was updated
           git pull --rebase origin main
 
           if [ -n "$(git status --porcelain)" ]; then
@@ -171,4 +166,3 @@ jobs:
             git push origin HEAD:main
           else
             echo "No changes to commit."
-          fi
