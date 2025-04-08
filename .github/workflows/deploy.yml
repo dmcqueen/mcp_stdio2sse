@@ -33,6 +33,7 @@ jobs:
           else
             echo "No uv.lock file. Proceeding."
             echo "skip=false" >> $GITHUB_OUTPUT
+          fi
 
   ##################################################################
   # 1) Find which servers exist (and have a Dockerfile).
