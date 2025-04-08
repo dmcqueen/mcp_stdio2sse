@@ -109,6 +109,7 @@ jobs:
           else
             echo "No pyproject.toml found for ${{ matrix.server }}."
             echo "skip_build=false" >> $GITHUB_OUTPUT
+          fi
 
       # 6) Create directory (named as the server) and put README.md in it
       - name: Create directory and copy README.md
