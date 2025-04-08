@@ -93,7 +93,7 @@ jobs:
             sed -i '/uv sync --frozen --no-install-project --no-dev --no-editable/i COPY pyproject.toml .' "$DOCKERFILE"
 
             # 3) Convert the plain "uv sync ..." into a "RUN uv sync ..."
-            sed -i 's@^uv sync @RUN uv sync @g' "$DOCKERFILE"
+            sed -i 's@^[[:space:]]*uv sync @RUN uv sync @g' "$DOCKERFILE"
 
             echo "Done patching!"
             echo "Updated Dockerfile contents:"
