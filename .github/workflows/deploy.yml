@@ -13,36 +13,11 @@ permissions:
 
 jobs:
   ##################################################################
-  # 0) Check if uv.lock is present, set 'skip' accordingly
-  ##################################################################
-  check-uv-lock:
-    name: Check uv.lock
-    runs-on: ubuntu-latest
-    outputs:
-      skip: ${{ steps.uv-lock-check.outputs.skip }}
-    steps:
-      - name: Check out this repo
-        uses: actions/checkout@v3
-
-      - name: Determine if uv.lock exists
-        id: uv-lock-check
-        run: |
-          if [ -f uv.lock ]; then
-            echo "uv.lock file found. Skipping."
-            echo "skip=true" >> $GITHUB_OUTPUT
-          else
-            echo "No uv.lock file. Proceeding."
-            echo "skip=false" >> $GITHUB_OUTPUT
-          fi
-
-  ##################################################################
   # 1) Find which servers exist (and have a Dockerfile).
   ##################################################################
   find-servers:
     name: Find Servers
     runs-on: ubuntu-latest
-    needs: [check-uv-lock]
-    if: needs.check-uv-lock.outputs.skip == 'false'
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
@@ -84,18 +59,24 @@ jobs:
           echo "matrix=$matrix" >> $GITHUB_OUTPUT
 
   ##################################################################
-  # 2) Build each server in parallel. Upload any README as artifact.
+  # 2) Build each server in parallel. Each server process
+  #    checks if uv.lock is present.
   ##################################################################
   build-and-collect:
     name: Build and Collect
     needs: [find-servers]
     runs-on: ubuntu-latest
-    if: needs.check-uv-lock.outputs.skip == 'false'
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.find-servers.outputs.matrix) }}
-
     steps:
+      # First, check out THIS repo so we can see if uv.lock is present
+      - name: Check out this repo
+        uses: actions/checkout@v3
+        with:
+          path: this-repo
+          fetch-depth: 0
+
       - name: Check out servers repository
         uses: actions/checkout@v3
         with:
@@ -103,7 +84,17 @@ jobs:
           ref: main
           path: servers
 
+      - name: Check for uv.lock
+        id: uv-check
+        run: |
+          if [ -f this-repo/uv.lock ]; then
+            echo "lock-found=true" >> $GITHUB_OUTPUT
+          else
+            echo "lock-found=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Build Docker image
+        if: steps.uv-check.outputs.lock-found == 'false'
         run: |
           docker build \
             --file "servers/src/${{ matrix.server }}/Dockerfile" \
@@ -111,6 +102,7 @@ jobs:
             servers
 
       - name: Package server README (if present)
+        if: steps.uv-check.outputs.lock-found == 'false'
         run: |
           if [ -f "servers/src/${{ matrix.server }}/README.md" ]; then
             mkdir -p "readme-${{ matrix.server }}"
@@ -118,6 +110,7 @@ jobs:
           fi
 
       - name: Upload artifact
+        if: steps.uv-check.outputs.lock-found == 'false'
         uses: actions/upload-artifact@v4
         with:
           name: readme-${{ matrix.server }}
@@ -127,12 +120,15 @@ jobs:
   ##################################################################
   # 3) Final job: downloads all artifacts, checks out *this* repo,
   #    collects the READMEs, then commits & pushes once.
+  #
+  # NOTE: If you'd like to skip the finalize step if uv.lock was found
+  # for ALL servers, you can conditionally skip here, too. For example:
+  # if: "needs.build-and-collect.outputs.any-build == 'true'"
   ##################################################################
   finalize-push:
     name: Collect & Push READMEs
     needs: [build-and-collect]
     runs-on: ubuntu-latest
-    if: needs.check-uv-lock.outputs.skip == 'false'
     steps:
       - name: Check out this repo
         uses: actions/checkout@v3
