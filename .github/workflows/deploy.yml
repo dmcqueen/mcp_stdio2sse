@@ -86,7 +86,7 @@ jobs:
           docker build \
             --file servers/src/${{ matrix.server }}/Dockerfile \
             --tag yourorg/${{ matrix.server }}:latest \
-            .
+            servers
 
       # - name: Push Docker image
       #   run: |
