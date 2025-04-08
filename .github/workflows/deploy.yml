@@ -107,6 +107,7 @@ jobs:
           else
             echo "No uv.lock found for ${{ matrix.server }}."
             echo "skip_build=false" >> $GITHUB_OUTPUT
+          fi
 
       # 6) Build the Docker image, only if skip_build == 'false'
       - name: Build Docker image
