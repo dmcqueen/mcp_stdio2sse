@@ -61,48 +61,44 @@ jobs:
       matrix: ${{ fromJson(needs.find-servers.outputs.matrix) }}
 
     steps:
-      # 1) Check out the current repo that contains uv.lock / pyproject.toml
+      # 1) Check out the main repo
       - name: Check out this repo
         uses: actions/checkout@v3
         with:
-          path: this-repo  # now we can access "this-repo/uv.lock"
+          path: this-repo
 
-      # 2) Check out the servers repository again so we can build from it
+      # 2) Check out the servers repo again
       - name: Check out servers repository
         uses: actions/checkout@v3
         with:
           repository: modelcontextprotocol/servers
           ref: main
-          path: servers  # this will be our build context
+          path: servers
 
-      # 3) Copy uv.lock and (optionally) pyproject.toml into servers/
-      - name: Copy build files into Docker context
+      # 3) Optionally copy uv.lock and pyproject.toml
+      #
+      #    If your uv.lock and pyproject.toml live under servers/src/time/ instead of in "this-repo",
+      #    you can copy them up to servers/ so that Docker sees them in the build context root.
+      - name: Copy local uv.lock and pyproject.toml up
         run: |
-          # Copy uv.lock if present
-          if [ -f this-repo/uv.lock ]; then
-            cp this-repo/uv.lock servers/uv.lock
-            echo "Copied uv.lock -> servers/uv.lock"
-          else
-            echo "No uv.lock found in this-repo"
+          # Adjust the path to whichever subfolder holds these two files.
+          # E.g., "servers/src/${{ matrix.server }}/uv.lock"
+          if [ -f "servers/src/${{ matrix.server }}/uv.lock" ]; then
+            cp "servers/src/${{ matrix.server }}/uv.lock" servers/uv.lock
+            echo "Copied uv.lock up to servers/uv.lock"
+          fi
+          if [ -f "servers/src/${{ matrix.server }}/pyproject.toml" ]; then
+            cp "servers/src/${{ matrix.server }}/pyproject.toml" servers/pyproject.toml
+            echo "Copied pyproject.toml up to servers/pyproject.toml"
           fi
 
-          # Copy pyproject.toml if present
-          if [ -f this-repo/pyproject.toml ]; then
-            cp this-repo/pyproject.toml servers/pyproject.toml
-            echo "Copied pyproject.toml -> servers/pyproject.toml"
-          else
-            echo "No pyproject.toml found in this-repo"
-          fi
-
-      # 4) Debug step: Show the contents of servers/
+      # 4) Debug listing
       - name: List files in build context
         run: |
-          echo "Listing servers/ directory:"
-          ls -al servers/
-          echo ""
-          echo "Check if .dockerignore in servers/ is excluding uv.lock or pyproject.toml."
+          echo "Listing servers/ after copying any uv.lock or pyproject.toml:"
+          ls -al servers
 
-      # 5) Build Docker image from the subfolder's Dockerfile
+      # 5) Build the Docker image from the server subfolder Dockerfile
       - name: Build Docker image
         run: |
           docker build \
