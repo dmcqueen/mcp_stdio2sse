@@ -5,14 +5,18 @@ on:
     branches:
       - main
     paths:
+      # So we only trigger if .github/workflows/deploy.yml itself changes.
+      # Adjust as needed.
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
-# IMPORTANT: Give the workflow permission to push back to the repo
 permissions:
-  contents: write
+  contents: write  # Needed so we can push to the repo
 
 jobs:
+  ##################################################################
+  # 1) Find which servers exist (and have a Dockerfile).
+  ##################################################################
   find-servers:
     name: Find Servers
     runs-on: ubuntu-latest
@@ -56,8 +60,13 @@ jobs:
           echo "Matrix: $matrix"
           echo "matrix=$matrix" >> $GITHUB_OUTPUT
 
-  build-and-deploy:
-    name: Build and Deploy
+  ##################################################################
+  # 2) Each server is built in parallel (matrix). 
+  #    We upload the server's README as an artifact (if it exists).
+  #    We do not push to GitHub here.
+  ##################################################################
+  build-and-collect:
+    name: Build and Collect
     needs: [find-servers]
     runs-on: ubuntu-latest
     strategy:
@@ -65,15 +74,6 @@ jobs:
       matrix: ${{ fromJson(needs.find-servers.outputs.matrix) }}
 
     steps:
-      # 1) Check out this repo, with push-capable token
-      - name: Check out this repo
-        uses: actions/checkout@v3
-        with:
-          path: this-repo
-          token: ${{ secrets.GITHUB_TOKEN }}
-          persist-credentials: true  # Needed so we can push back
-
-      # 2) Check out the servers repo
       - name: Check out servers repository
         uses: actions/checkout@v3
         with:
@@ -81,71 +81,83 @@ jobs:
           ref: main
           path: servers
 
-      # 3) Optionally copy uv.lock and pyproject.toml
-      - name: Copy local uv.lock and pyproject.toml
+      - name: Build Docker image
         run: |
-          if [ -f "servers/src/${{ matrix.server }}/uv.lock" ]; then
-            cp "servers/src/${{ matrix.server }}/uv.lock" servers/uv.lock
-            echo "Copied uv.lock up to servers/uv.lock"
-          fi
-          if [ -f "servers/src/${{ matrix.server }}/pyproject.toml" ]; then
-            cp "servers/src/${{ matrix.server }}/pyproject.toml" servers/pyproject.toml
-            echo "Copied pyproject.toml up to servers/pyproject.toml"
-          fi
+          docker build \
+            --file "servers/src/${{ matrix.server }}/Dockerfile" \
+            --tag "exampleorg/${{ matrix.server }}:latest" \
+            servers
+        # ^ If you need a skip mechanism for, say, Python-based servers, you can still do it here.
 
-      # 4) Debug listing
-      - name: List files in build context
+      - name: Upload server README (if present)
+        if: ${{ always() }}
         run: |
-          echo "Listing servers/ after copying any uv.lock or pyproject.toml:"
-          ls -al servers
-
-      # 5) Check for pyproject.toml and set a 'skip_build' output
-      - name: Check for pyproject.toml
-        id: check-uvlock
-        run: |
-          if [ -f "servers/src/${{ matrix.server }}/pyproject.toml" ]; then
-            echo "pyproject.toml found for ${{ matrix.server }}; build will be skipped."
-            echo "skip_build=true" >> $GITHUB_OUTPUT
-          else
-            echo "No pyproject.toml found for ${{ matrix.server }}."
-            echo "skip_build=false" >> $GITHUB_OUTPUT
-          fi
-
-      # 6) Create directory (named as the server) and put README.md in it
-      - name: Create directory and copy README.md
-        run: |
-          mkdir -p "this-repo/${{ matrix.server }}"
           if [ -f "servers/src/${{ matrix.server }}/README.md" ]; then
-            cp "servers/src/${{ matrix.server }}/README.md" "this-repo/${{ matrix.server }}/README.md"
-            echo "README.md copied to this-repo/${{ matrix.server }}/"
-          else
-            echo "No README.md found for ${{ matrix.server }}; skipping copy."
+            mkdir -p "readme-${{ matrix.server }}"
+            cp "servers/src/${{ matrix.server }}/README.md" "readme-${{ matrix.server }}/README.md"
           fi
+        # Then upload it as an artifact with a unique name
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: readme-${{ matrix.server }}
+          path: readme-${{ matrix.server }}
+          if-no-files-found: ignore
+        # The 'if-no-files-found: ignore' makes sure it doesn't fail if there's no README.
 
-      # 7) Commit & push README.md back to this repo
-      - name: Commit and push changes
-        # Optional: You can condition on skip_build here if you only want to commit
-        # when skip_build == false. Otherwise remove the "if" line below to always commit if changed.
-        if: steps.check-uvlock.outputs.skip_build == 'false'
+  ##################################################################
+  # 3) Final job: waits for all matrix builds to finish, 
+  #    downloads all artifacts (READMEs), checks out *this* repo, 
+  #    puts them in the appropriate folders, and does a single commit/push.
+  ##################################################################
+  finalize-push:
+    name: Collect & Push READMEs
+    needs: [build-and-collect]  # must wait for all parallel builds
+    runs-on: ubuntu-latest
+    steps:
+      # Check out this repo at full depth to handle merges properly
+      - name: Check out this repo
+        uses: actions/checkout@v3
+        with:
+          path: this-repo
+          fetch-depth: 0            # so we can pull/rebase if needed
+          persist-credentials: true # so we can push
+
+      - name: Download all README artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: collected-readmes
+        # This will download *all* artifacts from prior jobs into `collected-readmes/`,
+        # each artifact in its own subfolder named after the artifact.
+
+      - name: Move READMEs into the repo
+        run: |
+          cd collected-readmes
+          # Each artifact is in a subdirectory named readme-<server>
+          for d in readme-*; do
+            if [ -d "$d" ]; then
+              server="${d#readme-}"  # extract name after 'readme-'
+              mkdir -p "../this-repo/$server"
+              if [ -f "$d/README.md" ]; then
+                cp "$d/README.md" "../this-repo/$server/README.md"
+              fi
+            fi
+          done
+
+      - name: Commit and push
         run: |
           cd this-repo
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Only commit if there are changes
+          # Pull + rebase in case there were new commits
+          git pull --rebase origin main
+
+          # Add + commit
           if [ -n "$(git status --porcelain)" ]; then
             git add .
-            git commit -m "Add or update README.md for ${{ matrix.server }}"
+            git commit -m "Add or update READMEs from CI"
             git push origin HEAD:main
           else
             echo "No changes to commit."
           fi
-
-      # 8) Build the Docker image, only if skip_build == 'false'
-      - name: Build Docker image
-        if: steps.check-uvlock.outputs.skip_build == 'false'
-        run: |
-          docker build \
-            --file "servers/src/${{ matrix.server }}/Dockerfile" \
-            --tag "yourorg/${{ matrix.server }}:latest" \
-            servers
