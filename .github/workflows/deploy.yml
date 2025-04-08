@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-    # Adjust if you only want to run on changes in your local workflow repo
     paths:
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
@@ -66,35 +65,43 @@ jobs:
       matrix: ${{ fromJson(needs.find-servers.outputs.matrix) }}
 
     steps:
-      # 1) Check out *this* repo so we can access uv.lock (and possibly pyproject.toml)
+      # 1) Check out the *current* repo to access uv.lock or pyproject.toml
       - name: Check out the current repository
         uses: actions/checkout@v3
         with:
-          # This checks out the repo that contains this workflow
           path: this-repo
 
-      # 2) Check out the servers repository
-      - name: Check out the servers repository
+      # 2) Check out the servers repository again (for this job)
+      - name: Check out servers repository
         uses: actions/checkout@v3
         with:
           repository: modelcontextprotocol/servers
           ref: main
           path: servers
 
-      # 3) Copy uv.lock (and optionally pyproject.toml) from this repo into servers
-      - name: Copy uv.lock into servers
+      # 3) Copy uv.lock (and optionally pyproject.toml) to the servers build context
+      #    So Docker can find them with --mount=type=bind,source=uv.lock,target=uv.lock
+      - name: Copy lockfile(s) into build context
         run: |
           if [ -f this-repo/uv.lock ]; then
-            cp this-repo/uv.lock servers/
+            cp this-repo/uv.lock servers/uv.lock
             echo "Copied uv.lock to servers/."
           else
-            echo "No uv.lock file found in top-level of this repo."
+            echo "No uv.lock file found."
           fi
 
-      # 4) Build Docker image
+          # Optional: If you have pyproject.toml and the Dockerfile expects it:
+          if [ -f this-repo/pyproject.toml ]; then
+            cp this-repo/pyproject.toml servers/pyproject.toml
+            echo "Copied pyproject.toml to servers/."
+          else
+            echo "No pyproject.toml file found."
+          fi
+
+      # 4) Build Docker image using the existing Dockerfile (unchanged)
       - name: Build Docker image
         run: |
           docker build \
-            --file servers/src/${{ matrix.server }}/Dockerfile \
-            --tag yourorg/${{ matrix.server }}:latest \
+            --file "servers/src/${{ matrix.server }}/Dockerfile" \
+            --tag "yourorg/${{ matrix.server }}:latest" \
             servers
