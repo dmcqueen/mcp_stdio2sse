@@ -91,14 +91,6 @@ jobs:
             echo "No uv.lock file found in top-level of this repo."
           fi
 
-          If you also need pyproject.toml:
-          if [ -f this-repo/pyproject.toml ]; then
-            cp this-repo/pyproject.toml servers/
-            echo "Copied pyproject.toml to servers/."
-          else
-            echo "No pyproject.toml file found in top-level of this repo."
-          fi
-
       # 4) Build Docker image
       - name: Build Docker image
         run: |
