@@ -8,6 +8,10 @@ on:
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
+# IMPORTANT: Give the workflow permission to push back to the repo
+permissions:
+  contents: write
+
 jobs:
   find-servers:
     name: Find Servers
@@ -61,11 +65,13 @@ jobs:
       matrix: ${{ fromJson(needs.find-servers.outputs.matrix) }}
 
     steps:
-      # 1) Check out this repo
+      # 1) Check out this repo, with push-capable token
       - name: Check out this repo
         uses: actions/checkout@v3
         with:
           path: this-repo
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true  # Needed so we can push back
 
       # 2) Check out the servers repo
       - name: Check out servers repository
@@ -103,11 +109,9 @@ jobs:
           else
             echo "No pyproject.toml found for ${{ matrix.server }}."
             echo "skip_build=false" >> $GITHUB_OUTPUT
-          fi
 
       # 6) Create directory (named as the server) and put README.md in it
       - name: Create directory and copy README.md
-        if: steps.check-uvlock.outputs.skip_build == 'false'
         run: |
           mkdir -p "this-repo/${{ matrix.server }}"
           if [ -f "servers/src/${{ matrix.server }}/README.md" ]; then
@@ -117,7 +121,26 @@ jobs:
             echo "No README.md found for ${{ matrix.server }}; skipping copy."
           fi
 
-      # 7) Build the Docker image, only if skip_build == 'false'
+      # 7) Commit & push README.md back to this repo
+      - name: Commit and push changes
+        # Optional: You can condition on skip_build here if you only want to commit
+        # when skip_build == false. Otherwise remove the "if" line below to always commit if changed.
+        if: steps.check-uvlock.outputs.skip_build == 'false'
+        run: |
+          cd this-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Only commit if there are changes
+          if [ -n "$(git status --porcelain)" ]; then
+            git add .
+            git commit -m "Add or update README.md for ${{ matrix.server }}"
+            git push origin HEAD:main
+          else
+            echo "No changes to commit."
+          fi
+
+      # 8) Build the Docker image, only if skip_build == 'false'
       - name: Build Docker image
         if: steps.check-uvlock.outputs.skip_build == 'false'
         run: |
