@@ -40,6 +40,10 @@ jobs:
               continue
             fi
 
+            # We do NOT skip or remove the server from the matrix here in order
+            # to illustrate the skip logic in the build job itself.
+            # (Alternatively, you could skip adding it to the matrix if uv.lock is found.)
+
             if [ "$first" = true ]; then
               first=false
             else
@@ -61,7 +65,7 @@ jobs:
       matrix: ${{ fromJson(needs.find-servers.outputs.matrix) }}
 
     steps:
-      # 1) Check out the main repo
+      # 1) Check out this repo
       - name: Check out this repo
         uses: actions/checkout@v3
         with:
@@ -76,7 +80,6 @@ jobs:
           path: servers
 
       # 3) Optionally copy uv.lock and pyproject.toml
-      #    (Adjust the paths as needed to match your actual layout.)
       - name: Copy local uv.lock and pyproject.toml up
         run: |
           if [ -f "servers/src/${{ matrix.server }}/uv.lock" ]; then
@@ -94,14 +97,20 @@ jobs:
           echo "Listing servers/ after copying any uv.lock or pyproject.toml:"
           ls -al servers
 
-      # 5) Build the Docker image from the server subfolder Dockerfile
-      #
-      #    IMPORTANT: your Dockerfile must be set up so that either:
-      #    - your source code directory matches the [project.name] in pyproject.toml, OR
-      #    - you have defined [tool.hatch.build.targets.wheel] packages = ["<some_dir>"]
-      #      so Hatch knows where your Python package code actually resides.
-      #
+      # 5) Check for uv.lock and set a 'skip_build' output
+      - name: Check for uv.lock
+        id: check-uvlock
+        run: |
+          if [ -f "servers/src/${{ matrix.server }}/uv.lock" ]; then
+            echo "uv.lock found for ${{ matrix.server }}; build will be skipped."
+            echo "skip_build=true" >> $GITHUB_OUTPUT
+          else
+            echo "No uv.lock found for ${{ matrix.server }}."
+            echo "skip_build=false" >> $GITHUB_OUTPUT
+
+      # 6) Build the Docker image, only if skip_build == 'false'
       - name: Build Docker image
+        if: steps.check-uvlock.outputs.skip_build == 'false'
         run: |
           docker build \
             --file "servers/src/${{ matrix.server }}/Dockerfile" \
